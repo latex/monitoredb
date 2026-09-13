@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MonitoreDB - Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<style>
+:root {
+  --bg: #0f1117; --card: #1a1d27; --border: #2a2d3a;
+  --text: #e1e4eb; --muted: #8b8fa3; --accent: #6366f1;
+  --green: #22c55e; --red: #ef4444; --yellow: #eab308; --blue: #3b82f6;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 20px; }
+h1 { font-size: 1.5rem; margin-bottom: 4px; display: flex; align-items: center; gap: 10px; }
+h1 small { font-size: .8rem; color: var(--muted); font-weight: normal; }
+.subtitle { color: var(--muted); font-size: .85rem; margin-bottom: 20px; }
+.section-title { font-size: 1.1rem; margin: 24px 0 12px; color: var(--accent); display: flex; align-items: center; gap: 8px; }
+.section-title::after { content: ''; flex:1; height:1px; background: var(--border); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.card h3 { font-size: .75rem; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; letter-spacing: .5px; }
+.card .value { font-size: 1.6rem; font-weight: 700; }
+.card .sub { font-size: .78rem; color: var(--muted); margin-top: 4px; }
+.row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.row > .card { flex: 1; min-width: 300px; }
+.chart-row { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+.chart-row > .card { flex: 1; min-width: 340px; }
+.chart-card { position: relative; }
+.chart-card canvas { max-height: 180px; width: 100% !important; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); font-size: .82rem; }
+th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: .7rem; letter-spacing: .3px; }
+.status-running { color: var(--green); } .status-stopped { color: var(--red); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: .72rem; font-weight: 600; }
+.badge-ok { background: #166534; color: var(--green); }
+.badge-fail { background: #7f1d1d; color: var(--red); }
+.badge-warn { background: #713f12; color: var(--yellow); }
+.metrics-link { position: fixed; bottom: 16px; right: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 16px; color: var(--muted); text-decoration: none; font-size: .78rem; z-index: 100; }
+.metrics-link:hover { color: var(--accent); }
+.download-link { position: fixed; bottom: 16px; left: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 8px 16px; color: var(--accent); text-decoration: none; font-size: .78rem; z-index: 100; }
+.download-link:hover { background: var(--accent); color: #fff; }
+.tab { display: inline-block; padding: 6px 16px; cursor: pointer; border-radius: 6px 6px 0 0; font-size: .85rem; color: var(--muted); margin-right:2px; }
+.tab.active { background: var(--card); color: var(--text); border: 1px solid var(--border); border-bottom: none; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+.progress-bar { height: 6px; border-radius: 3px; background: var(--border); margin: 4px 0; overflow: hidden; }
+.progress-bar .fill { height: 100%; border-radius: 3px; transition: width .5s; }
+.agent-btn { display:inline-block; padding:4px 12px; margin:2px; border-radius:6px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:.8rem; }
+.agent-btn.active { border-color:var(--accent); background:var(--accent); color:#fff; }
+.btn { display:inline-block; padding:4px 12px; margin:2px; border-radius:6px; border:1px solid var(--border); background:var(--card); color:var(--text); cursor:pointer; font-size:.8rem; }
+.btn:hover { border-color:var(--accent); color:var(--accent); }
+.btn-danger:hover { border-color:var(--red); color:var(--red); }
+.agent-delete { margin-left:4px; padding:0 6px; border:none; background:none; color:var(--muted); cursor:pointer; font-size:.9rem; }
+.agent-delete:hover { color:var(--red); }
+</style>
+</head>
+<body>
+
+<h1>MonitoreDB <small>Windows & SQL Server</small></h1>
+<div class="subtitle" id="lastUpdate">Aguardando dados...</div>
+
+<div style="margin-bottom:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+  <button class="btn" onclick="addServer()">+ Servidor</button>
+  <div id="agentBar" style="flex:1;min-width:250px"></div>
+</div>
+
+<div class="grid" id="summaryCards"></div>
+
+<div style="margin-bottom: 16px;">
+  <span class="tab active" onclick="switchTab('os',this)">Sistema Operacional</span>
+  <span class="tab" onclick="switchTab('iis',this)">IIS</span>
+  <span class="tab" onclick="switchTab('sql',this)">SQL Server</span>
+</div>
+
+<div id="tab-os" class="tab-content active">
+  <div class="section-title">CPU & Memória</div>
+  <div class="chart-row">
+    <div class="card chart-card"><h3>CPU (%)</h3><canvas id="cpuChart"></canvas></div>
+    <div class="card chart-card"><h3>Memória (%)</h3><canvas id="memChart"></canvas></div>
+    <div class="card chart-card"><h3>Disco Geral (%)</h3><canvas id="diskAvgChart"></canvas></div>
+  </div>
+  <div class="chart-row">
+    <div class="card chart-card" style="flex:1.5"><h3>Disco por Volume (GB)</h3><canvas id="diskBarChart"></canvas></div>
+    <div class="card chart-card" style="flex:1"><h3>Rede (MB)</h3><canvas id="netChart"></canvas></div>
+  </div>
+  <div class="row">
+    <div class="card" style="flex:2"><h3>Processos (Top CPU)</h3>
+      <div style="max-height:260px;overflow:auto"><table><thead><tr><th>PID</th><th>Nome</th><th>CPU %</th><th>Memória</th></tr></thead><tbody id="processBody"></tbody></table></div>
+    </div>
+    <div class="card" style="flex:1.5"><h3>Serviços Windows</h3>
+      <div style="max-height:260px;overflow:auto" id="serviceList"></div>
+    </div>
+  </div>
+  <div class="card"><h3>Discos</h3><div id="diskDetail"></div></div>
+</div>
+
+<div id="tab-iis" class="tab-content">
+  <div class="section-title">Requests Ativas</div>
+  <div class="row">
+    <div class="card" style="flex:1">
+      <h3>Requests HTTP Agora</h3>
+      <div style="max-height:300px;overflow:auto" id="iisRequestList"></div>
+    </div>
+    <div class="card" style="flex:1">
+      <h3>Application Pools</h3>
+      <div style="max-height:300px;overflow:auto" id="iisPoolList"></div>
+    </div>
+  </div>
+  <div class="row">
+    <div class="card chart-card" style="flex:1"><h3>Requests por AppPool</h3><canvas id="iisReqChart"></canvas></div>
+    <div class="card chart-card" style="flex:1"><h3>Memória dos Pools (MB)</h3><canvas id="iisMemChart"></canvas></div>
+  </div>
+  <div class="row">
+    <div class="card chart-card" style="flex:1"><h3>CPU dos Pools (%)</h3><canvas id="iisCpuChart"></canvas></div>
+    <div class="card" style="flex:1"><h3>Servidor IIS</h3><div id="iisServerInfo"></div></div>
+  </div>
+</div>
+
+<div id="tab-sql" class="tab-content">
+  <div class="section-title">Performance</div>
+  <div class="chart-row">
+    <div class="card chart-card"><h3>Buffer Cache Hit Ratio (%)</h3><canvas id="bufferHitChart"></canvas></div>
+    <div class="card chart-card"><h3>Page Life Expectancy (s)</h3><canvas id="pleChart"></canvas></div>
+    <div class="card chart-card"><h3>Conexões</h3><canvas id="connChart"></canvas></div>
+  </div>
+  <div class="chart-row">
+    <div class="card chart-card"><h3>Deadlocks/s</h3><canvas id="deadlockChart"></canvas></div>
+    <div class="card chart-card"><h3>Batch Requests/s</h3><canvas id="batchChart"></canvas></div>
+  </div>
+  <div class="section-title">Bancos</div>
+  <div class="row">
+    <div class="card" style="flex:1.5"><h3>Tamanho dos Bancos (MB)</h3><canvas id="dbSizeChart"></canvas></div>
+    <div class="card" style="flex:1"><h3>Performance Atual</h3><div id="sqlPerfCards" style="display:grid;grid-template-columns:1fr 1fr;gap:8px"></div></div>
+  </div>
+  <div class="row">
+    <div class="card" style="flex:1.5"><h3>Bancos</h3><div style="max-height:200px;overflow:auto"><table><thead><tr><th>Banco</th><th>Estado</th><th>MB</th><th>Recovery</th></tr></thead><tbody id="databaseBody"></tbody></table></div></div>
+    <div class="card" style="flex:1"><h3>Conexões Ativas</h3><div id="connectionList" style="max-height:220px;overflow:auto"></div></div>
+  </div>
+  <div class="row">
+    <div class="card" style="flex:1"><h3>Jobs</h3><div id="jobList" style="max-height:200px;overflow:auto"></div></div>
+    <div class="card" style="flex:1"><h3>Backups</h3><div id="backupList" style="max-height:200px;overflow:auto"></div></div>
+  </div>
+</div>
+
+<a class="download-link" href="/download/monitoredb-agent.exe" download>⬇ Download Agente Windows</a>
+<a class="metrics-link" href="/api/metrics" target="_blank">Prometheus /metrics</a>
+
+<script>
+const MAX = 40;
+const hist = { cpu:[], mem:[], diskAvg:[], bufHit:[], ple:[], conn:[], deadlock:[], batch:[], labels:[] };
+let currentAgent = null;
+
+function ctx(id) { return document.getElementById(id).getContext('2d'); }
+
+function makeLine(id, color, fill=true) {
+  return new Chart(ctx(id), {
+    type: 'line',
+    data: { labels: hist.labels, datasets: [{ data: [], borderColor: color, backgroundColor: color+(fill?'33':'00'), fill, tension: .3, pointRadius: 0 }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: false,
+      scales: { y: { beginAtZero: true, grid: { color: '#2a2d3a' } }, x: { display: false } },
+      plugins: { legend: { display: false }, tooltip: { enabled: true } } }
+  });
+}
+const chCpu = makeLine('cpuChart','#6366f1'), chMem = makeLine('memChart','#22c55e'), chDiskAvg = makeLine('diskAvgChart','#eab308');
+const chBufHit = makeLine('bufferHitChart','#3b82f6'), chPle = makeLine('pleChart','#22c55e'), chConn = makeLine('connChart','#a855f7'), chDeadlock = makeLine('deadlockChart','#ef4444'), chBatch = makeLine('batchChart','#f97316');
+let chDiskBar=null, chDbSize=null, chNet=null;
+
+function getToken(){ return localStorage.getItem('mdb_token')||''; }
+function authHeaders(){ const h={'Content-Type':'application/json'}; const t=getToken(); if(t) h['Authorization']='Bearer '+t; return h; }
+async function withAuth(fn){ let resp = await fn(); if(resp.status===401){ const t=prompt('Token de acesso MonitoreDB:'); if(t&&t.trim()){ localStorage.setItem('mdb_token',t.trim()); resp = await fn(); } } return resp; }
+function setLine(ch, arr){ const d=ch.data.datasets[0].data; d.length=0; arr.slice(-MAX).forEach(v=>d.push(v==null?null:v)); ch.update('none'); }
+async function seedHistory(id){
+  if(!id) return;
+  try{
+    const r = await fetch(`/api/agent/${encodeURIComponent(id)}/history`);
+    const d = await r.json();
+    const s = (d.samples||[]).slice(-MAX);
+    if(!s.length) return;
+    hist.labels.length=0;
+    s.forEach(x=>hist.labels.push(new Date(x.timestamp).toLocaleTimeString()));
+    setLine(chCpu, s.map(x=>x.cpu_percent));
+    setLine(chMem, s.map(x=>x.memory_percent));
+    setLine(chDiskAvg, s.map(x=>x.disk_avg_percent));
+    setLine(chBufHit, s.map(x=>x.sql_buffer_cache_hit_ratio==null?null:Math.min(x.sql_buffer_cache_hit_ratio,100)));
+    setLine(chPle, s.map(x=>x.sql_page_life_expectancy==null?null:Math.min(x.sql_page_life_expectancy,99999)));
+    setLine(chConn, s.map(x=>x.sql_user_connections));
+    setLine(chDeadlock, s.map(x=>x.sql_deadlocks_per_sec));
+    setLine(chBatch, s.map(x=>x.sql_batch_requests_per_sec==null?null:Math.min(x.sql_batch_requests_per_sec,99999)));
+  }catch(e){}
+}
+
+function pushLine(ch,val) { ch.data.datasets[0].data.push(val); if(ch.data.datasets[0].data.length>MAX) ch.data.datasets[0].data.shift(); ch.update('none'); }
+function pushLabel() { hist.labels.push(new Date().toLocaleTimeString()); if(hist.labels.length>MAX) hist.labels.shift(); }
+function switchTab(name,el) { document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active')); document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active')); el.classList.add('active'); document.getElementById('tab-'+name).classList.add('active'); }
+function esc(s) { return s?.replace?.(/[&<>"]/g,c=>'&#'+c.charCodeAt(0)+';')||s||''; }
+
+async function fetchAgents() {
+  try {
+    const r = await fetch('/api/agents');
+    const d = await r.json();
+    const bar = document.getElementById('agentBar');
+    const agents = d.agents||[];
+    if(agents.length===0) { bar.innerHTML='<span class="sub">Nenhum servidor registrado</span>'; return; }
+    bar.innerHTML = agents.map(a =>
+      `<button class="agent-btn ${(!currentAgent||currentAgent===a.agent_id)?'active':''}" onclick="selectAgent('${a.agent_id}')">${a.hostname}${a.has_iis?' 🌐':''}${a.has_sql_server?' 🗄️':''}<span class="agent-delete" onclick="event.stopPropagation();deleteServer('${a.agent_id}','${a.hostname}')">×</span></button>`
+    ).join('');
+    if(!currentAgent) currentAgent = agents[0].agent_id;
+  } catch(e){}
+}
+
+async function selectAgent(id){ currentAgent=id; fetchAgents(); await seedHistory(id); fetchAll(); }
+
+async function addServer() {
+  const name = prompt('Nome do servidor (hostname):');
+  if(!name || !name.trim()) return;
+  const doFetch = () => fetch('/api/agents', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ agent_id: name.trim(), hostname: name.trim() })
+  });
+  const resp = await withAuth(doFetch);
+  if(resp.ok) { currentAgent=name.trim(); fetchAgents(); fetchAll(); }
+  else alert(resp.status===401 ? 'Token inválido ou ausente' : 'Erro ao adicionar servidor');
+}
+
+async function deleteServer(id, hostname) {
+  if(!confirm(`Remover servidor ${hostname}?`)) return;
+  const doFetch = () => fetch('/api/agent/'+encodeURIComponent(id), { method: 'DELETE', headers: authHeaders() });
+  const resp = await withAuth(doFetch);
+  if(resp.status===401){ alert('Token inválido ou ausente'); return; }
+  if(currentAgent === id) currentAgent = null;
+  fetchAgents(); fetchAll();
+}
+
+async function fetchAll() {
+  try {
+    const url = currentAgent ? `/api/agent/${encodeURIComponent(currentAgent)}` : '/api/latest';
+    const res = await fetch(url);
+    if(!res.ok) return;
+    const d = await res.json();
+    if(d.error) return;
+    const w = d.windows, s = d.sql_server;
+    const now = new Date().toLocaleString();
+    document.getElementById('lastUpdate').textContent = 'Última atualização: '+now+' | Agente: '+d.hostname;
+
+    document.getElementById('summaryCards').innerHTML = `
+      <div class="card"><h3>Host</h3><div class="value">${d.hostname||'-'}</div><div class="sub">${w?.os_version?.substring(0,50)||''}</div></div>
+      <div class="card"><h3>Uptime</h3><div class="value">${w?fmtUptime(w.uptime_seconds):'-'}</div><div class="sub">${w?.core_count||''} cores</div></div>
+      <div class="card"><h3>CPU</h3><div class="value">${w?w.cpu_percent.toFixed(1)+'%':'-'}</div><div class="sub">${w?.cpu_name||''}</div></div>
+      <div class="card"><h3>Memória</h3><div class="value">${w?w.memory_percent.toFixed(1)+'%':'-'}</div><div class="sub">${w?w.memory_used_gb.toFixed(1)+'/'+w.memory_total_gb.toFixed(1)+' GB':''}</div></div>
+      <div class="card"><h3>SQL Server</h3><div class="value">${s?.databases?.length||0} DBs</div><div class="sub">${s?.edition?.trim()?.substring(0,40)||'-'}</div></div>
+      <div class="card"><h3>Conexões</h3><div class="value">${s?.performance?.user_connections||s?.connections?.length||0}</div><div class="sub">${s?.server_name?.substring(0,40)||''}</div></div>`;
+
+    if(w) {
+      pushLine(chCpu,w.cpu_percent);
+      pushLine(chMem,w.memory_percent);
+      const avgD = w.disks.length ? w.disks.reduce((a,x)=>a+x.usage_percent,0)/w.disks.length : 0;
+      pushLine(chDiskAvg,avgD); pushLabel();
+
+      document.getElementById('processBody').innerHTML = w.top_processes.map(p =>
+        `<tr><td>${p.pid}</td><td>${esc(p.name)}</td><td>${p.cpu_percent.toFixed(1)}</td><td>${p.memory_mb.toFixed(0)} MB</td></tr>`
+      ).join('');
+      document.getElementById('serviceList').innerHTML = (w.services||[]).slice(0,30).map(s =>
+        `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border);font-size:.78rem">
+          <span>${esc(s.display_name||s.name)}</span><span class="${s.status==='Running'?'status-running':'status-stopped'}">● ${s.status}</span></div>`
+      ).join('');
+
+      if(chDiskBar) chDiskBar.destroy();
+      chDiskBar = new Chart(ctx('diskBarChart'),{type:'bar',data:{labels:w.disks.map(x=>x.mount),datasets:[{label:'Usado (GB)',data:w.disks.map(x=>x.used_gb),backgroundColor:w.disks.map((_,i)=>['#6366f1','#22c55e','#eab308','#ef4444','#3b82f6','#a855f7','#f97316','#14b8a6'][i%8]+'cc')},{label:'Livre (GB)',data:w.disks.map(x=>x.available_gb),backgroundColor:w.disks.map(()=>'#2a2d3a')}]},options:{responsive:true,maintainAspectRatio:false,animation:false,scales:{x:{stacked:true,grid:{color:'#2a2d3a'}},y:{stacked:true,grid:{display:false}}},plugins:{legend:{labels:{color:'#8b8fa3',boxWidth:10,padding:8}}}}});
+      if(chNet) chNet.destroy();
+      chNet = new Chart(ctx('netChart'),{type:'bar',data:{labels:w.network.map(x=>x.interface),datasets:[{label:'Recebido',data:w.network.map(x=>+(x.received_bytes/1048576).toFixed(1)),backgroundColor:'#3b82f6aa'},{label:'Enviado',data:w.network.map(x=>+(x.transmitted_bytes/1048576).toFixed(1)),backgroundColor:'#a855f7aa'}]},options:{responsive:true,maintainAspectRatio:false,animation:false,scales:{x:{grid:{color:'#2a2d3a'}},y:{beginAtZero:true,grid:{display:false}}},plugins:{legend:{labels:{color:'#8b8fa3',boxWidth:10,padding:8}}}}});
+
+      document.getElementById('diskDetail').innerHTML = w.disks.map(d =>
+        `<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:.8rem"><span>${d.mount}</span><span>${d.used_gb.toFixed(1)}/${d.total_gb.toFixed(1)} GB (${d.usage_percent.toFixed(1)}%)</span></div>
+        <div class="progress-bar"><div class="fill" style="width:${d.usage_percent}%;background:${d.usage_percent>90?'var(--red)':d.usage_percent>75?'var(--yellow)':'var(--green)'}"></div></div></div>`
+      ).join('');
+    }
+
+    if(d.iis) {
+      const i = d.iis;
+      document.getElementById('iisServerInfo').innerHTML = `
+        <div class="card"><h3>Servidor</h3><div class="value" style="font-size:1.1rem">${i.server_name}</div></div>
+        <div class="card" style="margin-top:8px"><h3>Requests</h3><div class="value" style="font-size:1.1rem">${(i.active_requests?.length)||(i.app_pools||[]).reduce((a,p)=>a+(p.active_requests||0),0)}</div></div>
+        <div class="card" style="margin-top:8px"><h3>AppPools</h3><div class="value" style="font-size:1.1rem">${i.app_pools?.length||0}</div></div>
+      `;
+
+      document.getElementById('iisRequestList').innerHTML = i.active_requests?.length
+        ? i.active_requests.map(r =>
+          `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:.78rem">
+            <div style="display:flex;justify-content:space-between">
+              <span><b>${r.verb||''}</b> ${esc(r.url||'').substring(0,60)}</span>
+              <span class="badge ${r.stage==='ExecuteRequestHandler'?'badge-ok':'badge-warn'}">${r.stage||''}</span>
+            </div>
+            <div class="sub">${r.client_ip||''} | ${r.app_pool||''} | ${r.time_ms?r.time_ms+'ms':''}</div>
+          </div>`
+        ).join('')
+        : '<span class="sub">Nenhuma request ativa</span>';
+
+      document.getElementById('iisPoolList').innerHTML = i.app_pools?.length
+        ? i.app_pools.map(p =>
+          `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:.78rem">
+            <span><b>${esc(p.name)}</b> (PID ${p.pid})</span>
+            <span class="sub">Req ${p.active_requests!=null?p.active_requests:'-'} | CPU ${p.cpu_percent.toFixed(1)}% | RAM ${p.memory_mb.toFixed(0)}MB</span>
+          </div>`
+        ).join('')
+        : '<span class="sub">Nenhum AppPool w3wp ativo</span>';
+
+      if(window.iisReqChart) window.iisReqChart.destroy();
+      const poolNames = i.app_pools?.map(p=>p.name)||[];
+      const reqByPool = {};
+      (i.active_requests||[]).forEach(r => { reqByPool[r.app_pool] = (reqByPool[r.app_pool]||0)+1; });
+      const reqCounts = (i.app_pools||[]).map(p => p.active_requests!=null ? p.active_requests : (reqByPool[p.name]||0));
+      window.iisReqChart = new Chart(ctx('iisReqChart'),{type:'bar',data:{labels:poolNames,datasets:[{data:reqCounts,backgroundColor:['#3b82f6','#22c55e','#eab308','#ef4444','#a855f7','#f97316']}]},options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false}},scales:{x:{grid:{color:'#2a2d3a'}},y:{beginAtZero:true,grid:{display:false}}}}});
+
+      if(window.iisMemChart) window.iisMemChart.destroy();
+      window.iisMemChart = new Chart(ctx('iisMemChart'),{type:'bar',data:{labels:poolNames,datasets:[{data:i.app_pools.map(p=>p.memory_mb),backgroundColor:['#6366f1','#22c55e','#eab308','#ef4444','#3b82f6','#a855f7']}]},options:{responsive:true,maintainAspectRatio:false,animation:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,grid:{color:'#2a2d3a'}},y:{grid:{display:false}}}}});
+
+      if(window.iisCpuChart) window.iisCpuChart.destroy();
+      window.iisCpuChart = new Chart(ctx('iisCpuChart'),{type:'bar',data:{labels:poolNames,datasets:[{data:i.app_pools.map(p=>p.cpu_percent),backgroundColor:['#f97316','#22c55e','#eab308','#ef4444','#3b82f6','#a855f7']}]},options:{responsive:true,maintainAspectRatio:false,animation:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,grid:{color:'#2a2d3a'}},y:{grid:{display:false}}}}});
+    }
+
+    if(s) {
+      document.getElementById('databaseBody').innerHTML = s.databases.map(d =>
+        `<tr><td>${d.name}</td><td>${d.state}</td><td>${d.size_mb}</td><td>${d.recovery_model}</td></tr>`
+      ).join('');
+
+      const p = s.performance;
+      document.getElementById('sqlPerfCards').innerHTML = p
+        ? `<div class="card"><h3>Buffer Hit</h3><div class="value" style="font-size:1.1rem">${p.buffer_cache_hit_ratio.toFixed(1)}%</div></div>
+           <div class="card"><h3>PLE</h3><div class="value" style="font-size:1.1rem">${p.page_life_expectancy}s</div></div>
+           <div class="card"><h3>Deadlocks/s</h3><div class="value" style="font-size:1.1rem">${p.deadlocks_per_sec}</div></div>
+           <div class="card"><h3>Conexões</h3><div class="value" style="font-size:1.1rem">${p.user_connections}</div></div>`
+        : '<div class="sub" style="grid-column:span 2">Sem dados</div>';
+
+      if(p) { pushLine(chBufHit,Math.min(p.buffer_cache_hit_ratio,100)); pushLine(chPle,Math.min(p.page_life_expectancy,99999)); pushLine(chConn,p.user_connections); pushLine(chDeadlock,p.deadlocks_per_sec); pushLine(chBatch,Math.min(p.batch_requests_per_sec,99999)); }
+
+      if(chDbSize) chDbSize.destroy();
+      const dbs = s.databases.sort((a,b)=>b.size_mb-a.size_mb).slice(0,15);
+      chDbSize = new Chart(ctx('dbSizeChart'),{type:'bar',data:{labels:dbs.map(x=>x.name),datasets:[{data:dbs.map(x=>x.size_mb),backgroundColor:dbs.map((_,i)=>['#6366f1','#22c55e','#eab308','#ef4444','#3b82f6','#a855f7','#f97316','#14b8a6'][i%8]+'cc')}]},options:{responsive:true,maintainAspectRatio:false,animation:false,indexAxis:'y',plugins:{legend:{display:false}},scales:{x:{beginAtZero:true,grid:{color:'#2a2d3a'}},y:{grid:{display:false}}}}});
+
+      document.getElementById('connectionList').innerHTML = s.connections.length
+        ? s.connections.slice(0,12).map(c => `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border);font-size:.78rem"><span>${esc(c.login_name)} @ ${esc(c.database)}</span><span class="sub">${esc(c.hostname)}</span></div>`).join('')
+        : '<span class="sub">Nenhuma conexão</span>';
+
+      document.getElementById('jobList').innerHTML = s.jobs.length
+        ? s.jobs.map(j => `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border);font-size:.78rem"><span>${esc(j.name)}</span><span class="badge ${j.last_run_status==='Succeeded'?'badge-ok':j.last_run_status==='Failed'?'badge-fail':'badge-warn'}">${j.last_run_status}</span></div>`).join('')
+        : '<span class="sub">Nenhum job</span>';
+
+      document.getElementById('backupList').innerHTML = s.backups.length
+        ? s.backups.slice(0,12).map(b => `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border);font-size:.78rem"><span><b>${esc(b.database)}</b> (${b.backup_type})</span><span class="sub">${b.last_backup?b.last_backup.substring(0,10):'Nunca'}</span></div>`).join('')
+        : '<span class="sub">Nenhum backup</span>';
+    }
+  } catch(e){ console.error('fetch error:',e); }
+}
+
+function fmtUptime(s){const d=Math.floor(s/86400),h=Math.floor((s%86400)/3600),m=Math.floor((s%3600)/60);return d+'d '+h+'h '+m+'m';}
+
+(async function init(){ await fetchAgents(); await seedHistory(currentAgent); fetchAll(); })();
+setInterval(()=>{ fetchAgents(); fetchAll(); }, 5000);
+</script>
+</body>
+</html>

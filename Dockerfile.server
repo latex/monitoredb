@@ -1,0 +1,35 @@
+FROM rust:1.88-slim-bookworm AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY Cargo.toml Cargo.lock* ./
+
+# Cache de dependências: compilar com stub, depois compilar com código real
+COPY server/Cargo.toml server/Cargo.toml
+COPY agent/Cargo.toml agent/Cargo.toml
+RUN mkdir -p server/src agent/src && echo "fn main() {}" > server/src/main.rs && echo "fn main() {}" > agent/src/main.rs
+RUN cargo build --release -p monitoredb-server 2>/dev/null || true
+
+COPY server/src ./server/src
+RUN find /app/server/src -type f -exec touch {} + && cargo build --release -p monitoredb-server && ls -la /app/target/release/monitoredb-server
+
+# Cross-compile do agente Windows (cliente de download)
+FROM rust:1.88-slim-bookworm AS win-builder
+RUN apt-get update && apt-get install -y --no-install-recommends gcc-mingw-w64-x86-64 && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY Cargo.toml Cargo.lock* ./
+COPY server/Cargo.toml server/Cargo.toml
+COPY agent/Cargo.toml agent/Cargo.toml
+RUN mkdir -p server/src agent/src && echo "fn main() {}" > server/src/main.rs && echo "fn main() {}" > agent/src/main.rs
+RUN rustup target add x86_64-pc-windows-gnu && cargo build --release --target x86_64-pc-windows-gnu -p monitoredb-agent 2>/dev/null || true
+COPY agent/src ./agent/src
+RUN find /app/agent/src -type f -exec touch {} + && cargo build --release --target x86_64-pc-windows-gnu -p monitoredb-agent && ls -la /app/target/x86_64-pc-windows-gnu/release/monitoredb-agent.exe
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY --from=builder /app/target/release/monitoredb-server /app/monitoredb-server
+COPY public /app/public
+COPY --from=win-builder /app/target/x86_64-pc-windows-gnu/release/monitoredb-agent.exe /app/public/download/monitoredb-agent.exe
+EXPOSE 3000
+ENTRYPOINT ["/app/monitoredb-server"]
+CMD ["--port", "3000"]

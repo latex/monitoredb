@@ -1,0 +1,23 @@
+FROM rust:1.88-slim-bookworm AS builder
+RUN apt-get update && apt-get install -y --no-install-recommends pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY Cargo.toml Cargo.lock* ./
+COPY server/Cargo.toml server/Cargo.toml
+COPY agent/Cargo.toml agent/Cargo.toml
+RUN mkdir -p server/src agent/src && echo "fn main() {}" > server/src/main.rs && echo "fn main() {}" > agent/src/main.rs
+RUN cargo build --release -p monitoredb-agent 2>/dev/null || true
+COPY agent/src ./agent/src
+RUN find /app/agent/src -type f -exec touch {} + && cargo build --release -p monitoredb-agent && ls -la /app/target/release/monitoredb-agent
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl gnupg apt-transport-https \
+    && curl -s https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
+    && curl -s https://packages.microsoft.com/config/debian/12/prod.list > /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update \
+    && ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends mssql-tools18 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+ENV PATH="$PATH:/opt/mssql-tools18/bin"
+COPY --from=builder /app/target/release/monitoredb-agent /usr/local/bin/monitoredb-agent
+WORKDIR /app
+ENTRYPOINT ["monitoredb-agent"]

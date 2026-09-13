@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Monitoredb.ApiServer/Monitoredb.ApiServer.csproj" />
+  <Project Path="Monitoredb.WorkerAgent/Monitoredb.WorkerAgent.csproj" />
+</Solution>

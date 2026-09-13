@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "dgSpecHash": "8FL+GqPgLTc=",
+  "success": true,
+  "projectFilePath": "/home/leandro/source/invent/britch/monitoredb/monitoredb.dotnet/Monitoredb.ApiServer/Monitoredb.ApiServer.csproj",
+  "expectedPackageFiles": [
+    "/home/leandro/.nuget/packages/microsoft.aspnetcore.openapi/10.0.12/microsoft.aspnetcore.openapi.10.0.12.nupkg.sha512",
+    "/home/leandro/.nuget/packages/microsoft.openapi/2.12.0/microsoft.openapi.2.12.0.nupkg.sha512",
+    "/home/leandro/.nuget/packages/prometheus.client/6.3.0/prometheus.client.6.3.0.nupkg.sha512",
+    "/home/leandro/.nuget/packages/prometheus.client.abstractions/6.3.0/prometheus.client.abstractions.6.3.0.nupkg.sha512"
+  ],
+  "logs": []
+}
