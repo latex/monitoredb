@@ -19,7 +19,7 @@ public sealed class AgentOptions
     public bool Once { get; init; }
 }
 
-public sealed class Worker(ILogger<Worker> logger, AgentOptions options) : BackgroundService
+public sealed class Worker(ILogger<Worker> logger, AgentOptions options, IHostApplicationLifetime lifetime) : BackgroundService
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -42,7 +42,10 @@ public sealed class Worker(ILogger<Worker> logger, AgentOptions options) : Backg
         {
             await CollectAndSend(client, agentId, ingestUrl, stoppingToken);
             if (options.Once)
+            {
+                lifetime.StopApplication();
                 break;
+            }
             await Task.Delay(TimeSpan.FromSeconds(options.IntervalSeconds), stoppingToken);
         } while (!stoppingToken.IsCancellationRequested);
     }
