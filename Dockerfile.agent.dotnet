@@ -1,0 +1,26 @@
+# MonitoreDB Agent (.NET)
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+# Copia a solução e projetos
+COPY monitoredb.dotnet/monitoredb.sln.slnx ./
+COPY monitoredb.dotnet/Core/Monitoredb.CommonCollectors/Monitoredb.CommonCollectors.csproj Core/Monitoredb.CommonCollectors/
+COPY monitoredb.dotnet/Monitoredb.ApiServer/Monitoredb.ApiServer.csproj Monitoredb.ApiServer/
+COPY monitoredb.dotnet/Monitoredb.WorkerAgent/Monitoredb.WorkerAgent.csproj Monitoredb.WorkerAgent/
+RUN dotnet restore Monitoredb.WorkerAgent/Monitoredb.WorkerAgent.csproj
+
+# Copia código-fonte
+COPY monitoredb.dotnet/Core/ Core/
+COPY monitoredb.dotnet/Monitoredb.ApiServer/ Monitoredb.ApiServer/
+COPY monitoredb.dotnet/Monitoredb.WorkerAgent/ Monitoredb.WorkerAgent/
+
+# Publica o agente
+RUN dotnet publish Monitoredb.WorkerAgent/Monitoredb.WorkerAgent.csproj -c Release -o /app/publish
+
+# Runtime
+FROM mcr.microsoft.com/dotnet/runtime:10.0 AS runtime
+WORKDIR /app
+
+COPY --from=build /app/publish ./
+
+ENTRYPOINT ["dotnet", "Monitoredb.WorkerAgent.dll"]

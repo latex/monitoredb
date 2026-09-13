@@ -2,7 +2,7 @@ services:
   server:
     build:
       context: .
-      dockerfile: Dockerfile.server
+      dockerfile: Dockerfile.server.dotnet
     ports:
       - "3000:3000"
     environment:
@@ -37,7 +37,7 @@ services:
   agent:
     build:
       context: .
-      dockerfile: Dockerfile.agent
+      dockerfile: Dockerfile.agent.dotnet
     depends_on:
       server:
         condition: service_healthy

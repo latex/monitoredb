@@ -1,4 +1,6 @@
 <Solution>
+  <Project Path="Core/Monitoredb.CommonCollectors/Monitoredb.CommonCollectors.csproj" />
   <Project Path="Monitoredb.ApiServer/Monitoredb.ApiServer.csproj" />
   <Project Path="Monitoredb.WorkerAgent/Monitoredb.WorkerAgent.csproj" />
+  <Project Path="Monitoredb.Tests/Monitoredb.Tests.csproj" />
 </Solution>

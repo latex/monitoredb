@@ -4,3 +4,10 @@
 *.log
 *.pid
 *.exe
+
+# .NET
+bin/
+obj/
+**/data/
+*.user
+*.suo

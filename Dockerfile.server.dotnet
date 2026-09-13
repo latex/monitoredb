@@ -1,0 +1,37 @@
+# MonitoreDB Server (.NET)
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+# Copia a solução e projetos
+COPY monitoredb.dotnet/monitoredb.sln.slnx ./
+COPY monitoredb.dotnet/Core/Monitoredb.CommonCollectors/Monitoredb.CommonCollectors.csproj Core/Monitoredb.CommonCollectors/
+COPY monitoredb.dotnet/Monitoredb.ApiServer/Monitoredb.ApiServer.csproj Monitoredb.ApiServer/
+COPY monitoredb.dotnet/Monitoredb.WorkerAgent/Monitoredb.WorkerAgent.csproj Monitoredb.WorkerAgent/
+RUN dotnet restore Monitoredb.ApiServer/Monitoredb.ApiServer.csproj
+
+# Copia código-fonte
+COPY monitoredb.dotnet/Core/ Core/
+COPY monitoredb.dotnet/Monitoredb.ApiServer/ Monitoredb.ApiServer/
+COPY monitoredb.dotnet/Monitoredb.WorkerAgent/ Monitoredb.WorkerAgent/
+
+# Publica o servidor
+RUN dotnet publish Monitoredb.ApiServer/Monitoredb.ApiServer.csproj -c Release -o /app/publish
+
+# Runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /app/publish ./
+COPY public/ ./public/
+
+ENV ASPNETCORE_URLS=http://0.0.0.0:3000
+ENV PORT=3000
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:3000/api/health || exit 1
+
+ENTRYPOINT ["dotnet", "Monitoredb.ApiServer.dll"]
