@@ -1,12 +1,25 @@
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Monitoredb.WorkerAgent;
 
-// Parse de argumentos de linha de comando (compatível com o agente Rust)
-// --server http://host:3000 | --agent-id nome | --interval 30 | --token xxx
-// --sql-host host | --sql-port 1433 | --sql-user sa | --sql-pass senha | --once
-var cliArgs = CliParser.Parse(args);
+// O agente roda de 3 formas com a mesma build:
+//   - Console/SSH .......... dotnet Monitoredb.WorkerAgent.dll [--flags]
+//   - Servico do Windows ... registrado via sc.exe (UseWindowsService)
+//   - Container ............ docker compose
+//
+// Precedencia de configuracao:
+//   flags CLI  >  appsettings.json (Monitoredb:*)  >  variaveis MONITOREDB_*
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+{
+    Args = args,
+    // Servico roda com CWD = C:\Windows\System32; garante que appsettings.json
+    // seja lido do diretorio da aplicacao.
+    ContentRootPath = AppContext.BaseDirectory,
+});
 
-var builder = Host.CreateApplicationBuilder(args);
-builder.Services.AddSingleton(cliArgs);
+builder.Services.AddWindowsService(o => o.ServiceName = "MonitoredbAgent");
+
+var options = CliParser.Parse(args, builder.Configuration);
+builder.Services.AddSingleton(options);
 builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();

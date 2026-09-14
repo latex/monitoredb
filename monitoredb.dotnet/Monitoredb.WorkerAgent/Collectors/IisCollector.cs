@@ -105,11 +105,20 @@ public static class IisCollector
                 }
               }
             }
+            # Mapeia PID -> app pool via "appcmd list wp" (mais confiavel que CommandLine).
+            $pidToPool = @{}
+            $wpText = & $appcmd list wp 2>$null
+            foreach ($line in @($wpText)) {
+              if ($line -match 'WP\s+"(\d+)".*applicationPool:([^\)]+)\)') {
+                $pidToPool[[int]$Matches[1]] = $Matches[2].Trim()
+              }
+            }
             $w3wp = Get-CimInstance Win32_Process -Filter "Name='w3wp.exe'"
             $result = @{ pools = $stateMap; workers = @() }
             $w3wp | %{
                 $pool = ""
-                if ($_.CommandLine -match '-ap\s+"([^"]+)"') { $pool = $Matches[1] }
+                if ($pidToPool.ContainsKey([int]$_.ProcessId)) { $pool = $pidToPool[[int]$_.ProcessId] }
+                elseif ($_.CommandLine -match '-ap\s+"([^"]+)"') { $pool = $Matches[1] }
                 if ($pool -ne "" -and -not $stateMap.ContainsKey($pool)) { $stateMap[$pool] = "Running" }
                 $result.workers += @{ pid = $_.ProcessId; pool = $pool }
             }
@@ -276,14 +285,26 @@ public static class IisCollector
                 CreateNoWindow = true,
             };
             psi.ArgumentList.Add("-NoProfile");
+            psi.ArgumentList.Add("-NonInteractive");
             psi.ArgumentList.Add("-Command");
             psi.ArgumentList.Add(script);
             using var p = Process.Start(psi);
             if (p == null)
                 return "";
-            var stdout = p.StandardOutput.ReadToEnd();
-            p.WaitForExit(30000);
-            return stdout;
+
+            // Drena stdout E stderr em paralelo para evitar deadlock de buffer cheio.
+            var stdoutTask = p.StandardOutput.ReadToEndAsync();
+            var stderrTask = p.StandardError.ReadToEndAsync();
+
+            if (!p.WaitForExit(30000))
+            {
+                try { p.Kill(entireProcessTree: true); } catch { }
+                return "";
+            }
+
+            // Garante que ambas as leituras terminaram (EOF) antes de retornar.
+            _ = stderrTask.GetAwaiter().GetResult();
+            return stdoutTask.GetAwaiter().GetResult();
         }
         catch
         {

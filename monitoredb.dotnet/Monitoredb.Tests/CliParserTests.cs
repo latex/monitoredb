@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Monitoredb.WorkerAgent;
 
 namespace Monitoredb.Tests;
@@ -75,5 +76,65 @@ public class CliParserTests
         var opts = CliParser.Parse(["--server", "http://host:3000/"]);
 
         Assert.Equal("http://host:3000/", opts.Server);
+    }
+
+    private static IConfiguration Config(params (string Key, string Value)[] pairs) =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(pairs.ToDictionary(p => p.Key, p => (string?)p.Value))
+            .Build();
+
+    [Fact]
+    public void Parse_ReadsAppSettings_WhenNoArgs()
+    {
+        var config = Config(
+            ("Monitoredb:Server", "http://cfg:3000"),
+            ("Monitoredb:AgentId", "win-vm"),
+            ("Monitoredb:Interval", "45"),
+            ("Monitoredb:Token", "tok-123"),
+            ("Monitoredb:SqlHost", "sqlhost"),
+            ("Monitoredb:SqlPort", "1444"),
+            ("Monitoredb:SqlUser", "sa"),
+            ("Monitoredb:SqlPassword", "pw!"));
+
+        var opts = CliParser.Parse([], config);
+
+        Assert.Equal("http://cfg:3000", opts.Server);
+        Assert.Equal("win-vm", opts.AgentId);
+        Assert.Equal(45, opts.IntervalSeconds);
+        Assert.Equal("tok-123", opts.Token);
+        Assert.Equal("sqlhost", opts.SqlHost);
+        Assert.Equal(1444, opts.SqlPort);
+        Assert.Equal("sa", opts.SqlUser);
+        Assert.Equal("pw!", opts.SqlPassword);
+    }
+
+    [Fact]
+    public void Parse_CliArgs_OverrideAppSettings()
+    {
+        var config = Config(("Monitoredb:Server", "http://cfg:3000"), ("Monitoredb:AgentId", "from-cfg"));
+
+        var opts = CliParser.Parse(["--server", "http://cli:3000", "--agent-id", "from-cli"], config);
+
+        Assert.Equal("http://cli:3000", opts.Server);
+        Assert.Equal("from-cli", opts.AgentId);
+    }
+
+    [Fact]
+    public void Parse_EmptyAppSettingsValue_FallsBackToDefault()
+    {
+        var config = Config(("Monitoredb:AgentId", ""), ("Monitoredb:Server", ""));
+
+        var opts = CliParser.Parse([], config);
+
+        Assert.Null(opts.AgentId);
+        Assert.Equal("http://localhost:3000", opts.Server);
+    }
+
+    [Fact]
+    public void Parse_SqlPasswordAlias_IsAccepted()
+    {
+        var opts = CliParser.Parse(["--sql-password", "compat"]);
+
+        Assert.Equal("compat", opts.SqlPassword);
     }
 }
