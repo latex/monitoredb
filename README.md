@@ -1,140 +1,248 @@
 # MonitoreDB
 
-Monitoramento centralizado de servidores Windows: um **servidor** recebe snapshots de
-**agentes** instalados nos hosts monitorados e expõe uma API REST, um dashboard web e
-métricas no formato Prometheus.
+Monitoramento centralizado de servidores Windows (IIS e SQL Server).
 
-Coleta disponível nos agentes:
+- **Servidor** — recebe os snapshots, mantém o histórico, serve um dashboard web e expõe
+  as métricas no formato Prometheus.
+- **Cliente (agente)** — instalado em cada host monitorado; coleta CPU, memória, disco,
+  uptime, IIS e SQL Server, e envia para o servidor.
 
-- **Windows** — CPU, memória, disco e uptime.
-- **IIS** — status de sites e app pools (somente Windows).
-- **SQL Server** — sessões, conexões e uso de recursos.
-
-O projeto possui duas implementações:
-
-- **.NET 10** (`monitoredb.dotnet/`) — implementação **atual** (servidor + agente).
-- **Rust** (`server/`, `agent/`) — implementação **legada**, mantida como referência.
-
-## Estrutura do repositório
+Implementação atual: **.NET 10** (`monitoredb.dotnet/`). A pasta `server/` e `agent/`
+(Rust) é a implementação **legada**, mantida como referência.
 
 ```
-monitoredb/
-├── monitoredb.dotnet/            # Implementação .NET (atual)
-│   ├── Core/
-│   │   └── Monitoredb.CommonCollectors/   # Modelos e coletores (Windows/IIS/SQL)
-│   ├── Monitoredb.ApiServer/              # Servidor HTTP + dashboard + Prometheus
-│   ├── Monitoredb.WorkerAgent/            # Agente de coleta
-│   ├── Monitoredb.Tests/                  # Testes xUnit
-│   └── monitoredb.sln.slnx                # Solution
-├── scripts/                      # Instaladores Linux e utilitários
-│   ├── install-server-linux.sh   # Instalador do servidor (systemd)
-│   ├── uninstall-server-linux.sh # Desinstalador do servidor
-│   ├── install-service.ps1       # Registra o agente como serviço do Windows
-│   └── iis-load.sh / .ps1        # Gerador de carga HTTP (para testes)
-├── public/                       # Frontend (dashboard) — index.html
-├── Dockerfile.server.dotnet      # Imagem do servidor .NET
-├── Dockerfile.agent.dotnet       # Imagem do agente .NET
-├── docker-compose.yml            # Servidor + SQL Server + agente
-├── Makefile                      # Atalhos de build/execução
-├── .env.example                  # Modelo de configuração
-└── VERSION
+   Host monitorado (Windows)                 Servidor (Linux/Windows/Docker)
+ ┌───────────────────────────┐             ┌──────────────────────────────┐
+ │  Cliente MonitoreDB       │  HTTP POST  │  MonitoreDB Server (:3000)   │
+ │  (Monitoredb.WorkerAgent) │ ──────────► │  /api/ingest                 │
+ │  coleta: Windows/IIS/SQL  │  Bearer     │  Dashboard + /api/metrics    │
+ └───────────────────────────┘             └──────────────────────────────┘
 ```
-
-## Requisitos
-
-| Uso | Requisitos |
-|-----|-----------|
-| Docker (recomendado) | Docker Engine 24+ e Docker Compose v2 |
-| Execução local (.NET) | .NET SDK 10 |
-| Instalação em servidor Linux | systemd, root/sudo |
-| Implementação legada (Rust) | Rust 1.88+ |
 
 ---
 
-## 1. Subir com Docker (recomendado)
+## Requisitos
 
-O `docker-compose.yml` sobe três serviços: `server` (API), `sqlserver` (SQL Server 2022)
-e `agent` (agente de coleta).
+| Componente | Requisitos |
+|------------|-----------|
+| Servidor via Docker | Docker Engine 24+ e Docker Compose v2 |
+| Servidor nativo Linux | systemd + root/sudo |
+| Servidor/Cliente via .NET | .NET SDK 10 (build) ou runtime ASP.NET Core 10 |
+| Cliente (Windows) | Windows 10/Server 2016+; .NET Runtime 10 (ou self-contained) |
+
+---
+
+# Como subir a aplicação (servidor)
+
+Escolha **uma** das três formas abaixo. A porta padrão é **3000**.
+
+## Opção A — Docker (recomendado)
+
+O `docker-compose.yml` sobe o servidor, um SQL Server 2022 e um agente de exemplo.
 
 ```bash
-# 1. Crie o arquivo de configuração
+# 1. Clone o repositório
+git clone https://github.com/latex/monitoredb.git
+cd monitoredb
+
+# 2. Crie o arquivo de configuração
 cp .env.example .env
 
-# 2. Edite .env e defina OBRIGATORIAMENTE a senha do SQL Server
+# 3. Edite o .env e defina a senha do SQL Server (obrigatório)
 #    MSSQL_SA_PASSWORD=uma-senha-forte
-#    (opcional) MONITOREDB_TOKEN=seu-token-de-autenticacao
+#    MONITOREDB_TOKEN=seu-token-de-autenticacao   (recomendado)
 
-# 3. Suba a stack
+# 4. Suba a stack
 docker compose up -d
 
-# 4. Acompanhe os logs
+# 5. Acompanhe a subida
 docker compose logs -f
 ```
 
 Acesse o dashboard em **http://localhost:3000**.
 
-Comandos úteis:
-
 ```bash
-docker compose ps          # status dos serviços
+docker compose ps          # status
 docker compose logs -f server
-docker compose down        # derruba (mantém volumes)
-docker compose down -v     # derruba e apaga os dados
+docker compose down        # para (mantém os dados)
+docker compose down -v     # para e apaga os dados
 ```
 
-### Build manual das imagens
+## Opção B — Instalação nativa em Linux (systemd)
+
+Instala o servidor como serviço, com usuário dedicado e runtime .NET automático.
 
 ```bash
-# Servidor
-docker build -f Dockerfile.server.dotnet -t monitoredb-server:latest .
+git clone https://github.com/latex/monitoredb.git
+cd monitoredb
 
-# Agente
-docker build -f Dockerfile.agent.dotnet -t monitoredb-agent:latest .
+# Instala (gera um token automaticamente)
+sudo ./scripts/install-server-linux.sh
+
+# Exemplos de customização
+sudo ./scripts/install-server-linux.sh --port 8080 --token "meu-token"
+sudo ./scripts/install-server-linux.sh --self-contained   # não exige .NET no host
+sudo ./scripts/install-server-linux.sh --open-firewall    # libera a porta no ufw/firewalld
 ```
 
----
-
-## 2. Subir localmente (.NET)
-
-### Servidor
+O instalador publica a aplicação, cria o usuário `monitoredb`, grava a configuração em
+`/etc/monitoredb/server.env`, registra o serviço `monitoredb` e faz o health check.
 
 ```bash
+systemctl status monitoredb      # status
+journalctl -u monitoredb -f      # logs
+systemctl restart monitoredb     # reiniciar
+
+# Remover
+sudo ./scripts/uninstall-server-linux.sh --purge
+```
+
+> Use `sudo ./scripts/install-server-linux.sh --help` para ver todas as opções
+> (`--install-dir`, `--data-dir`, `--conf-dir`, `--user`, `--service`, `--source`, ...).
+
+## Opção C — Desenvolvimento local
+
+```bash
+git clone https://github.com/latex/monitoredb.git
+cd monitoredb
+
 dotnet run --project monitoredb.dotnet/Monitoredb.ApiServer
 ```
 
-O servidor escuta em `http://0.0.0.0:3000` por padrão. Configure pela variável `PORT`:
+Escuta em `http://0.0.0.0:3000`. Para trocar a porta:
 
 ```bash
 PORT=8080 dotnet run --project monitoredb.dotnet/Monitoredb.ApiServer
 ```
 
-Variáveis de ambiente do servidor:
+### Configuração do servidor
 
 | Variável | Padrão | Descrição |
 |----------|--------|-----------|
 | `PORT` | `3000` | Porta HTTP |
 | `MONITOREDB_TOKEN` | vazio | Token de autenticação. **Vazio = API aberta** |
-| `MONITOREDB_DATA_FILE` | `data/state.json` | Caminho do arquivo de persistência do estado |
+| `MONITOREDB_DATA_FILE` | `data/state.json` | Arquivo de persistência do estado |
 
 > O dashboard é servido de `public/`. A pasta precisa existir no diretório da aplicação,
 > caso contrário o servidor não inicia.
 
-### Agente
+---
 
-```bash
-dotnet run --project monitoredb.dotnet/Monitoredb.WorkerAgent -- \
-  --server http://localhost:3000 \
-  --agent-id meu-host \
-  --interval 30
+# Como instalar o cliente (agente)
+
+O cliente roda **no servidor monitorado** (Windows) e envia os dados para o servidor
+MonitoreDB. O procedimento abaixo é feito no host monitorado, com **PowerShell como
+Administrador**.
+
+## 1. Gerar o executável do cliente
+
+No host monitorado, dentro do repositório clonado:
+
+```powershell
+# Self-contained (NÃO exige .NET instalado no host) — recomendado
+dotnet publish monitoredb.dotnet/Monitoredb.WorkerAgent -c Release -r win-x64 `
+  --self-contained true -p:PublishSingleFile=true -p:DebugType=None -o C:\Monitoredb
+
+# OU framework-dependent (exige .NET Runtime 10 instalado)
+dotnet publish monitoredb.dotnet/Monitoredb.WorkerAgent -c Release -r win-x64 `
+  --self-contained false -o C:\Monitoredb
 ```
 
-Coleta única (sem loop), útil para testes:
+> Se você não tiver o SDK .NET no host, gere o publish em outra máquina com
+> `dotnet publish ... -r win-x64` e copie a pasta `C:\Monitoredb` resultante.
 
-```bash
-dotnet run --project monitoredb.dotnet/Monitoredb.WorkerAgent -- --server http://localhost:3000 --once
+## 2. Configurar o cliente
+
+Edite `C:\Monitoredb\appsettings.json` apontando para o seu servidor:
+
+```json
+{
+  "Monitoredb": {
+    "Server": "http://SEU-SERVIDOR:3000",
+    "AgentId": "web01",
+    "Interval": 30,
+    "Token": "SEU_TOKEN_DO_SERVIDOR",
+    "SqlHost": "localhost",
+    "SqlPort": 1433,
+    "SqlUser": "sa",
+    "SqlPassword": "SUA_SENHA_SQL"
+  }
+}
 ```
 
-Flags disponíveis:
+- `Server` — URL do servidor MonitoreDB.
+- `AgentId` — identificador do host (vazio = hostname da máquina).
+- `Token` — deve ser igual ao `MONITOREDB_TOKEN` do servidor.
+- `SqlHost` / `SqlUser` / `SqlPassword` — preencha para coletar SQL Server
+  (deixe `SqlHost` vazio para desabilitar).
+- A coleta de **IIS** é automática quando o host é Windows.
+
+**Precedência de configuração:** flags de linha de comando > `appsettings.json`
+(`Monitoredb:*`) > variáveis de ambiente `MONITOREDB_*`.
+
+## 3. Registrar como serviço do Windows
+
+O script `scripts/install-service.ps1` registra o cliente como serviço com inicialização
+automática e recuperação em caso de falha.
+
+```powershell
+# Copie o instalador para a pasta do cliente
+Copy-Item scripts\install-service.ps1 C:\Monitoredb\
+
+# Registre e inicie o serviço (Administrador)
+cd C:\Monitoredb
+.\scripts\install-service.ps1 -Start
+```
+
+O serviço é criado com o nome **`MonitoredbAgent`** usando o `appsettings.json` da pasta
+`C:\Monitoredb`. Para instalar em outro diretório:
+
+```powershell
+.\install-service.ps1 -InstallDir "C:\Program Files\Monitoredb" -Start
+```
+
+## 4. Verificar
+
+```powershell
+Get-Service MonitoredbAgent
+Get-EventLog -LogName Application -Source MonitoredbAgent -Newest 20
+```
+
+No servidor, confira o dashboard (**http://SEU-SERVIDOR:3000**) — o host deve aparecer na
+lista de agentes em até `Interval` segundos.
+
+### Teste rápido (sem instalar como serviço)
+
+```powershell
+C:\Monitoredb\Monitoredb.WorkerAgent.exe --server http://SEU-SERVIDOR:3000 --once
+```
+
+## Opção: baixar o cliente pelo dashboard
+
+O dashboard possui o botão **"Download Agente Windows"**, que baixa
+`/download/monitoredb-agent.exe`. Para habilitá-lo no servidor, publique o cliente como
+arquivo único e coloque-o em `public/download/monitoredb-agent.exe`:
+
+```powershell
+dotnet publish monitoredb.dotnet/Monitoredb.WorkerAgent -c Release -r win-x64 `
+  --self-contained true -p:PublishSingleFile=true -o C:\temp\agent
+
+# No servidor, copie para a pasta servida
+mkdir public\download
+Copy-Item C:\temp\agent\Monitoredb.WorkerAgent.exe public\download\monitoredb-agent.exe
+```
+
+## Opção: cliente em container (Linux)
+
+O agente também roda em container (coleta sistema operacional e SQL Server):
+
+```bash
+docker build -f Dockerfile.agent.dotnet -t monitoredb-agent:latest .
+docker run --rm monitoredb-agent:latest \
+  --server http://SEU-SERVIDOR:3000 --agent-id container-01 --once
+```
+
+### Flags do cliente
 
 | Flag | Descrição | Padrão |
 |------|-----------|--------|
@@ -142,14 +250,11 @@ Flags disponíveis:
 | `--agent-id ID` | Identificador do agente | hostname da máquina |
 | `--interval SEG` | Intervalo entre coletas | `30` |
 | `--token TOKEN` | Token Bearer de ingestão | vazio |
-| `--sql-host HOST` | Host do SQL Server (habilita coleta SQL) | vazio |
+| `--sql-host HOST` | Host do SQL Server (habilita coleta) | vazio |
 | `--sql-port PORT` | Porta do SQL Server | `1433` |
 | `--sql-user USER` | Usuário do SQL Server | `sa` |
-| `--sql-pass SENHA` / `--sql-password SENHA` | Senha do SQL Server | vazio |
+| `--sql-pass SENHA` | Senha do SQL Server | vazio |
 | `--once` | Coleta uma vez e encerra | — |
-
-**Precedência de configuração:** flags CLI > `appsettings.json` (`Monitoredb:*`) >
-variáveis de ambiente `MONITOREDB_*`.
 
 Variáveis equivalentes: `MONITOREDB_AGENT_SERVER`, `MONITOREDB_AGENT_ID`,
 `MONITOREDB_AGENT_INTERVAL`, `MONITOREDB_AGENT_TOKEN`, `MONITOREDB_SQL_HOST`,
@@ -157,63 +262,7 @@ Variáveis equivalentes: `MONITOREDB_AGENT_SERVER`, `MONITOREDB_AGENT_ID`,
 
 ---
 
-## 3. Instalar o servidor em Linux (systemd)
-
-O instalador publica o servidor, cria usuário de sistema dedicado, configura
-`/etc/monitoredb/server.env` e registra o serviço systemd.
-
-```bash
-# Instalação com token gerado automaticamente
-sudo ./scripts/install-server-linux.sh
-
-# Opções comuns
-sudo ./scripts/install-server-linux.sh --port 8080 --token "meu-token"
-sudo ./scripts/install-server-linux.sh --no-token          # API aberta
-sudo ./scripts/install-server-linux.sh --self-contained    # não exige .NET no host
-sudo ./scripts/install-server-linux.sh --source ./publish  # usa binários já publicados
-```
-
-Principais opções: `--install-dir` (`/opt/monitoredb`), `--data-dir`
-(`/var/lib/monitoredb`), `--conf-dir` (`/etc/monitoredb`), `--user` (`monitoredb`),
-`--service` (`monitoredb`), `--rid` (`linux-x64`/`linux-arm64`), `--no-start`,
-`--open-firewall`. Use `--help` para a lista completa.
-
-Operação do serviço:
-
-```bash
-systemctl status monitoredb
-journalctl -u monitoredb -f
-systemctl restart monitoredb
-```
-
-Desinstalação:
-
-```bash
-sudo ./scripts/uninstall-server-linux.sh            # remove o serviço
-sudo ./scripts/uninstall-server-linux.sh --purge    # remove serviço, dados, config e usuário
-```
-
----
-
-## 4. Instalar o agente no Windows (serviço)
-
-Publique o agente e registre-o como serviço:
-
-```powershell
-dotnet publish monitoredb.dotnet/Monitoredb.WorkerAgent -c Release -r win-x64 --self-contained false -o C:\Monitoredb
-
-# Registra o serviço "MonitoredbAgent" (requer administrador)
-.\scripts\install-service.ps1 -Start
-```
-
-A configuração vem do `appsettings.json` no diretório do executável (seção `Monitoredb`),
-ou de flags/variáveis `MONITOREDB_*`.
-
-Para provisionar o IIS no host monitorado, use `install-iis.ps1`.
-
----
-
-## 5. Endpoints da API
+## Referência da API
 
 Base: `http://<host>:3000`
 
@@ -229,52 +278,54 @@ Base: `http://<host>:3000`
 | `GET` | `/api/metrics` | Não | Métricas em formato Prometheus |
 | `GET` | `/api/health` | Não | Health check (`{"status":"ok"}`) |
 
-Autenticação: quando `MONITOREDB_TOKEN` está definido, as rotas marcadas exigem o header
-`Authorization: Bearer <token>`. As rotas de leitura permanecem abertas.
-
-Exemplo:
-
 ```bash
-# Health check
 curl http://localhost:3000/api/health
 
-# Registrar agente (com token)
 curl -X POST http://localhost:3000/api/agents \
   -H "Authorization: Bearer $MONITOREDB_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"agent_id":"web01","hostname":"web01.local"}'
 ```
 
-Dashboard: **http://localhost:3000/**
-Métricas Prometheus: **http://localhost:3000/api/metrics**
+- Dashboard: **http://localhost:3000/**
+- Métricas Prometheus: **http://localhost:3000/api/metrics**
 
----
-
-## 6. Build e testes
+## Build e testes
 
 ```bash
-# Build da solution
 dotnet build monitoredb.dotnet/monitoredb.sln.slnx
-
-# Testes
-dotnet test monitoredb.dotnet/monitoredb.sln.slnx
-
-# Publicar o servidor
-make publish-server
+dotnet test  monitoredb.dotnet/monitoredb.sln.slnx
+make publish-server     # publica o servidor em publish/server
 ```
 
-Alvos do `Makefile`:
-
-| Alvo | Ação |
-|------|------|
+| Alvo do Makefile | Ação |
+|------------------|------|
 | `make publish-server` | Publica o servidor .NET em `publish/server` |
 | `make install-server-linux` | Executa o instalador Linux |
 | `make uninstall-server-linux` | Executa o desinstalador Linux |
 | `make build-server` / `build-agent` | Build Rust (legado) |
-| `make dev-server` / `dev-agent` | Executa Rust (legado) |
 | `make up` / `down` / `logs` | Docker Compose |
 
----
+## Estrutura do repositório
+
+```
+monitoredb/
+├── monitoredb.dotnet/                     # Implementação .NET (atual)
+│   ├── Core/Monitoredb.CommonCollectors/  # Modelos e coletores (Windows/IIS/SQL)
+│   ├── Monitoredb.ApiServer/              # Servidor HTTP + dashboard + Prometheus
+│   ├── Monitoredb.WorkerAgent/            # Cliente (agente) de coleta
+│   ├── Monitoredb.Tests/                  # Testes xUnit
+│   └── monitoredb.sln.slnx
+├── scripts/
+│   ├── install-server-linux.sh            # Instalador do servidor (systemd)
+│   ├── uninstall-server-linux.sh
+│   ├── install-service.ps1                # Registra o cliente como serviço do Windows
+│   └── iis-load.sh / .ps1                 # Gerador de carga HTTP (testes)
+├── public/                                # Frontend (dashboard) — index.html
+├── Dockerfile.server.dotnet / agent.dotnet
+├── docker-compose.yml
+└── .env.example
+```
 
 ## Segurança
 
@@ -290,7 +341,9 @@ Alvos do `Makefile`:
   pasta `public/` (com `index.html`) para o diretório da aplicação.
 - **`MSSQL_SA_PASSWORD` ausente no Docker** — defina a variável no `.env`; o Compose
   falha de propósito sem ela.
-- **Agente sem dados de IIS** — a coleta de IIS só ocorre em Windows.
-- **Agente sem dados de SQL Server** — informe `--sql-host` e credenciais válidas.
-- **Health check não retorna 200 no instalador** — verifique
+- **Cliente não aparece no dashboard** — confira `Server`, `Token` e se o serviço
+  `MonitoredbAgent` está em execução; teste com `--once`.
+- **Cliente sem dados de IIS** — a coleta de IIS só ocorre em Windows.
+- **Cliente sem dados de SQL Server** — informe `SqlHost` e credenciais válidas.
+- **Health check não retorna 200 no instalador Linux** — verifique
   `journalctl -u monitoredb -n 50`.
