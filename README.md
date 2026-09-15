@@ -347,3 +347,7 @@ monitoredb/
 - **Cliente sem dados de SQL Server** — informe `SqlHost` e credenciais válidas.
 - **Health check não retorna 200 no instalador Linux** — verifique
   `journalctl -u monitoredb -n 50`.
+
+## Licença
+
+Distribuído sob a licença **MIT**. Veja [LICENSE](LICENSE) para os detalhes.
